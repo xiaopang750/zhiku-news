@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {retrieveAndRerank,resolveQuery,tokenize} from '../lib/rag.mjs';
+const rows=[{id:'ai',title:'Artificial intelligence policy',title_zh:'人工智能政策',original:'Artificial intelligence can accelerate research. Policy should evaluate AI safety and funding.',published_at:'2026-11-07',source_url:'https://example.org/ai'},{id:'q',title:'Quantum computing',original:'Quantum computing is a promising research field. Quantum error correction is important.',published_at:'2026-11-01',source_url:'https://example.org/quantum'},{id:'x',title:'Football',original:'Football match score and stadium.'}];
+let r=retrieveAndRerank(rows,{question:'人工智能政策',now:Date.parse('2026-11-08')});assert.equal(r.chunks[0].article_id,'ai');assert.equal(r.coverage.candidateBudget,12);assert.equal(r.coverage.evidenceBudget,3);
+r=retrieveAndRerank(rows,{question:'对比人工智能和量子计算'});assert.equal(r.coverage.evidenceBudget,5);assert.ok(r.chunks.some(x=>x.article_id==='ai'));assert.ok(r.chunks.some(x=>x.article_id==='q'));
+r=retrieveAndRerank(rows,{question:'火山喷发玄武岩'});assert.equal(r.chunks.length,0);
+assert.match(resolveQuery('第二点的证据呢',[{role:'user',content:'人工智能政策'}]),/人工智能/);
+assert.ok(!tokenize('claim').includes('ai'));
+const x=retrieveAndRerank([{...rows[0],original:rows[0].original.repeat(500),original_length:100000,source_url:'javascript:alert(1)'}],{question:'人工智能',total:600});assert.ok(x.chunks.length<=3);assert.ok(x.chunks.every(c=>c.source_url===null));assert.ok(x.limitations.some(l=>l.includes('600')));assert.ok(x.limitations.some(l=>l.includes('30,000')));
+console.log('PASS: bilingual lexical recall, topic relevance, dynamic budgets, no-result behavior, follow-up query, source URL and coverage limits.');
+assert.equal(resolveQuery('量子计算',[{role:'user',content:'人工智能政策'}]),'量子计算');
+const footer=retrieveAndRerank([{id:'tourism',title:'Tourism spending',original:'Tourism and hotels.\n## Related news\nQuantum research.'}],{question:'量子计算'});assert.equal(footer.chunks.length,0);
+const intelligence=retrieveAndRerank([{id:'war',title:'Military briefing',original:'Intelligence officials held talks.'}],{question:'人工智能'});assert.equal(intelligence.chunks.length,0);
+console.log('PASS: new-topic isolation, related-news removal and intelligence/AI disambiguation.');

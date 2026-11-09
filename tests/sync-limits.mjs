@@ -1,0 +1,10 @@
+import fs from 'node:fs';import ts from 'typescript';import vm from 'node:vm';import assert from 'node:assert/strict';
+let batches=[];const DB={prepare:sql=>({bind:(...values)=>({sql,values})}),batch:async stmts=>{batches.push(stmts)}};
+const source=fs.readFileSync('app/api/sync/route.ts','utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__env;');
+const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const context={exports:{},__env:{DB},Response,TextEncoder,TextDecoder,Uint8Array,RangeError};vm.createContext(context);vm.runInContext(js,context);
+const send=body=>context.exports.POST(new Request('https://example.com/api/sync',{method:'POST',body:JSON.stringify(body)}));
+const raw=JSON.parse(fs.readFileSync('/workspace/shared/zhiku-intel/site_exports/batch_0003.json','utf8'));let r=await send(raw);assert.equal(r.status,200);assert.equal(batches.length,1);const article=raw.articles.find(a=>a.id==='ada607130e7c8e0e87391dfc');const stored=JSON.parse(batches[0].find(x=>x.values[0]===article.id).values[7]);for(const k of ['content','original_markdown','paragraphs'])assert.deepEqual(stored[k],article[k]);console.log('PASS real large report accepted; content/markdown/paragraphs unchanged');
+batches=[];r=await send({articles:[{id:'too-large',title:'x',content:'中'.repeat(510000)}]});assert.equal(r.status,413);assert.equal(batches.length,0);console.log('PASS UTF-8 byte limit rejects before writes');
+r=await send({articles:[{id:'valid',title:'ok'},null]});assert.equal(r.status,400);assert.equal(batches.length,0);console.log('PASS invalid batch performs no partial writes');
+r=await send({articles:[],extra:'x'.repeat(5000001)});assert.equal(r.status,413);assert.equal(batches.length,0);console.log('PASS actual body limit enforced without Content-Length');

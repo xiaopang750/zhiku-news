@@ -1,0 +1,26 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const entry=`
+import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';
+import {FilterSelect,DateFilter,ReadingTabs,Button,Input} from './components/library-controls';
+import {sourceLabel,articleTitle} from './lib/chinese-labels';
+const a=articleTitle({title:'English',title_zh:'中文标题'});
+if(a!=='中文标题'||sourceLabel('Atlantic Council')!=='大西洋理事会')throw Error('Translation regression');
+const html=renderToStaticMarkup(<><FilterSelect label="采集来源" value="Atlantic Council" placeholder="全部" options={[{value:'Atlantic Council',label:'大西洋理事会'}]} onChange={()=>{}}/><DateFilter label="发表日期起" value="2026-11-07" onChange={()=>{}}/><ReadingTabs value="analysis" onChange={()=>{}} attachments={2}>内容</ReadingTabs><Button>搜索</Button><Input placeholder="搜索文章"/></>);
+console.log(html);
+`;
+const r=await build({stdin:{contents:entry,resolveDir:process.cwd(),loader:'tsx'},bundle:true,platform:'node',format:'cjs',write:false,jsx:'automatic'});
+fs.writeFileSync('/tmp/zhiku-ui-test.cjs',r.outputFiles[0].text);
+const {execFileSync}=await import('node:child_process');const html=execFileSync('node',['/tmp/zhiku-ui-test.cjs'],{encoding:'utf8'});
+assert(html.includes('role="combobox"'));assert(html.includes('role="tablist"'));assert(html.includes('aria-haspopup="dialog"'));assert(html.includes('大西洋理事会'));assert(html.includes('2026-11-07'));assert(!html.includes('type="date"'));
+const source=fs.readFileSync('app/page.tsx','utf8');assert(!source.includes('<select'));assert(!source.includes('type="date"'));assert(source.includes('articleTitle(v)'));assert(source.includes('articleTitle(a)'));
+console.log('PASS library SSR semantics: combobox, date popover, tabs, Chinese labels; native select/date removed');
+const pageBundle=await build({stdin:{contents:`import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import Page from './app/page';console.log(renderToStaticMarkup(<Page/>));`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,platform:'node',format:'cjs',write:false,jsx:'automatic'});
+fs.writeFileSync('/tmp/zhiku-page-ui-test.cjs',pageBundle.outputFiles[0].text);
+const pageHtml=execFileSync('node',['/tmp/zhiku-page-ui-test.cjs'],{encoding:'utf8'});
+const metrics=pageHtml.match(/<div class="metrics">([\s\S]*?)<\/div>/)?.[1]||'';
+assert(metrics.includes('篇已入库')&&metrics.includes('个采集来源'));
+assert(!metrics.includes('<svg'));
+assert(!pageHtml.includes('\uFFFD'));
+console.log('PASS metric labels are readable Chinese text with no ambiguous glyph icons');
